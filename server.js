@@ -3,6 +3,7 @@ const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
@@ -21,9 +22,11 @@ function addDays(days) {
 
 function generateKey() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
   let out = "ANACLIENT-";
 
   for (let group = 0; group < 4; group++) {
+
     for (let i = 0; i < 4; i++) {
       out += chars[Math.floor(Math.random() * chars.length)];
     }
@@ -40,18 +43,10 @@ app.get("/", (req, res) => {
   });
 });
 
-app.post("/generate", async (req, res) => {
-  const { days, admin_secret } = req.body;
-
-  if (admin_secret !== ADMIN_SECRET) {
-    return res.status(403).json({
-      success: false,
-      message: "No permission"
-    });
-  }
+app.get("/testgenerate", async (req, res) => {
 
   const license_key = generateKey();
-  const expires_at = addDays(days || 7);
+  const expires_at = addDays(7);
 
   const { error } = await supabase.from("licenses").insert({
     license_key,
@@ -60,9 +55,9 @@ app.post("/generate", async (req, res) => {
   });
 
   if (error) {
-    return res.status(500).json({
+    return res.json({
       success: false,
-      message: error.message
+      error: error.message
     });
   }
 
@@ -74,14 +69,8 @@ app.post("/generate", async (req, res) => {
 });
 
 app.post("/activate", async (req, res) => {
-  const { license_key, hwid } = req.body;
 
-  if (!license_key || !hwid) {
-    return res.status(400).json({
-      success: false,
-      message: "Missing data"
-    });
-  }
+  const { license_key, hwid } = req.body;
 
   const { data, error } = await supabase
     .from("licenses")
@@ -113,7 +102,7 @@ app.post("/activate", async (req, res) => {
   if (data.hwid && data.hwid !== hwid) {
     return res.json({
       success: false,
-      message: "License already used"
+      message: "Wrong PC"
     });
   }
 
@@ -126,12 +115,12 @@ app.post("/activate", async (req, res) => {
 
   res.json({
     success: true,
-    message: "License activated",
-    expires_at: data.expires_at
+    message: "License activated"
   });
 });
 
 app.post("/check", async (req, res) => {
+
   const { license_key, hwid } = req.body;
 
   const { data, error } = await supabase
@@ -142,36 +131,30 @@ app.post("/check", async (req, res) => {
 
   if (error || !data) {
     return res.json({
-      success: false,
-      message: "Invalid license"
+      success: false
     });
   }
 
   if (!data.active) {
     return res.json({
-      success: false,
-      message: "License disabled"
+      success: false
     });
   }
 
   if (new Date(data.expires_at) < new Date()) {
     return res.json({
-      success: false,
-      message: "License expired"
+      success: false
     });
   }
 
   if (data.hwid !== hwid) {
     return res.json({
-      success: false,
-      message: "Wrong PC"
+      success: false
     });
   }
 
   res.json({
-    success: true,
-    message: "License valid",
-    expires_at: data.expires_at
+    success: true
   });
 });
 
