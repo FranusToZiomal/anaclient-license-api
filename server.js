@@ -20,6 +20,10 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 
 function addDays(days) {
 
+  if (Number(days) === 0) {
+    return "9999-12-31T23:59:59.000Z";
+  }
+
   const date = new Date();
 
   date.setDate(
