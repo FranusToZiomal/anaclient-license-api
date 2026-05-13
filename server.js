@@ -20,7 +20,6 @@ function requireAdmin(req, res) {
       success: false,
       message: "Wrong admin secret"
     });
-
     return false;
   }
 
@@ -56,6 +55,31 @@ function generateKey() {
   return out;
 }
 
+async function autoDisableExpiredLicense(license) {
+  try {
+    if (!license) return;
+
+    const isLifetime =
+      String(license.expires_at).startsWith("9999");
+
+    if (isLifetime) return;
+
+    const expired =
+      new Date(license.expires_at) < new Date();
+
+    if (expired && license.active === true) {
+      await supabase
+        .from("licenses")
+        .update({ active: false })
+        .eq("license_key", license.license_key);
+
+      license.active = false;
+    }
+  } catch (e) {
+    console.log("Auto disable error:", e.message);
+  }
+}
+
 app.get("/", (req, res) => {
   res.json({
     status: "Anaclient License API online"
@@ -67,6 +91,7 @@ app.post("/generate", async (req, res) => {
     if (!requireAdmin(req, res)) return;
 
     const license_key = generateKey();
+
     const expires_at = addDays(req.body.days || 7);
 
     const { error } = await supabase
@@ -89,7 +114,6 @@ app.post("/generate", async (req, res) => {
       license_key,
       expires_at
     });
-
   } catch (e) {
     res.status(500).json({
       success: false,
@@ -115,27 +139,12 @@ app.post("/activate", async (req, res) => {
       });
     }
 
-    if (new Date(data.expires_at) < new Date()) {
-
-      if (data.active) {
-        await supabase
-          .from("licenses")
-          .update({
-            active: false
-          })
-          .eq("license_key", license_key);
-      }
-
-      return res.json({
-        success: false,
-        message: "License expired"
-      });
-    }
+    await autoDisableExpiredLicense(data);
 
     if (!data.active) {
       return res.json({
         success: false,
-        message: "License disabled"
+        message: "License disabled or expired"
       });
     }
 
@@ -149,9 +158,7 @@ app.post("/activate", async (req, res) => {
     if (!data.hwid) {
       await supabase
         .from("licenses")
-        .update({
-          hwid
-        })
+        .update({ hwid })
         .eq("license_key", license_key);
     }
 
@@ -160,7 +167,6 @@ app.post("/activate", async (req, res) => {
       message: "License activated",
       expires_at: data.expires_at
     });
-
   } catch (e) {
     res.json({
       success: false,
@@ -186,27 +192,12 @@ app.post("/check", async (req, res) => {
       });
     }
 
-    if (new Date(data.expires_at) < new Date()) {
-
-      if (data.active) {
-        await supabase
-          .from("licenses")
-          .update({
-            active: false
-          })
-          .eq("license_key", license_key);
-      }
-
-      return res.json({
-        success: false,
-        message: "License expired"
-      });
-    }
+    await autoDisableExpiredLicense(data);
 
     if (!data.active) {
       return res.json({
         success: false,
-        message: "License disabled"
+        message: "License disabled or expired"
       });
     }
 
@@ -222,7 +213,6 @@ app.post("/check", async (req, res) => {
       message: "License valid",
       expires_at: data.expires_at
     });
-
   } catch (e) {
     res.json({
       success: false,
@@ -249,11 +239,14 @@ app.post("/admin/list", async (req, res) => {
       });
     }
 
+    for (const license of data) {
+      await autoDisableExpiredLicense(license);
+    }
+
     res.json({
       success: true,
       licenses: data
     });
-
   } catch (e) {
     res.json({
       success: false,
@@ -286,7 +279,9 @@ app.post("/admin/extend", async (req, res) => {
         ? new Date(data.expires_at)
         : new Date();
 
-    baseDate.setDate(baseDate.getDate() + Number(days));
+    baseDate.setDate(
+      baseDate.getDate() + Number(days)
+    );
 
     const { error: updateError } = await supabase
       .from("licenses")
@@ -308,7 +303,6 @@ app.post("/admin/extend", async (req, res) => {
       message: "License extended",
       expires_at: baseDate.toISOString()
     });
-
   } catch (e) {
     res.json({
       success: false,
@@ -338,9 +332,12 @@ app.post("/admin/reduce", async (req, res) => {
 
     const date = new Date(data.expires_at);
 
-    date.setDate(date.getDate() - Number(days));
+    date.setDate(
+      date.getDate() - Number(days)
+    );
 
-    const expired = date < new Date();
+    const expired =
+      date < new Date();
 
     const { error: updateError } = await supabase
       .from("licenses")
@@ -362,7 +359,6 @@ app.post("/admin/reduce", async (req, res) => {
       message: "License time reduced",
       expires_at: date.toISOString()
     });
-
   } catch (e) {
     res.json({
       success: false,
@@ -396,7 +392,6 @@ app.post("/admin/lifetime", async (req, res) => {
       success: true,
       message: "License set to lifetime"
     });
-
   } catch (e) {
     res.json({
       success: false,
@@ -429,7 +424,6 @@ app.post("/admin/enable", async (req, res) => {
       success: true,
       message: "License enabled"
     });
-
   } catch (e) {
     res.json({
       success: false,
@@ -462,7 +456,6 @@ app.post("/admin/disable", async (req, res) => {
       success: true,
       message: "License disabled"
     });
-
   } catch (e) {
     res.json({
       success: false,
@@ -495,7 +488,6 @@ app.post("/admin/reset-hwid", async (req, res) => {
       success: true,
       message: "HWID reset"
     });
-
   } catch (e) {
     res.json({
       success: false,
@@ -524,9 +516,8 @@ app.post("/admin/delete", async (req, res) => {
 
     res.json({
       success: true,
-      message: "License deleted"
+      message: "License deleted permanently"
     });
-
   } catch (e) {
     res.json({
       success: false,
