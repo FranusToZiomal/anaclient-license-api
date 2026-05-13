@@ -3,6 +3,7 @@ const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
@@ -15,9 +16,14 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 
 function requireAdmin(req, res) {
   if (req.body.admin_secret !== ADMIN_SECRET) {
-    res.status(403).json({ success: false, message: "Wrong admin secret" });
+    res.status(403).json({
+      success: false,
+      message: "Wrong admin secret"
+    });
+
     return false;
   }
+
   return true;
 }
 
@@ -28,25 +34,32 @@ function addDays(days) {
 
   const date = new Date();
   date.setDate(date.getDate() + Number(days));
+
   return date.toISOString();
 }
 
 function generateKey() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
   let out = "ANACLIENT-";
 
   for (let group = 0; group < 4; group++) {
     for (let i = 0; i < 4; i++) {
       out += chars[Math.floor(Math.random() * chars.length)];
     }
-    if (group !== 3) out += "-";
+
+    if (group !== 3) {
+      out += "-";
+    }
   }
 
   return out;
 }
 
 app.get("/", (req, res) => {
-  res.json({ status: "Anaclient License API online" });
+  res.json({
+    status: "Anaclient License API online"
+  });
 });
 
 app.post("/generate", async (req, res) => {
@@ -56,17 +69,32 @@ app.post("/generate", async (req, res) => {
     const license_key = generateKey();
     const expires_at = addDays(req.body.days || 7);
 
-    const { error } = await supabase.from("licenses").insert({
+    const { error } = await supabase
+      .from("licenses")
+      .insert({
+        license_key,
+        expires_at,
+        active: true
+      });
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    res.json({
+      success: true,
       license_key,
-      expires_at,
-      active: true
+      expires_at
     });
 
-    if (error) return res.status(500).json({ success: false, message: error.message });
-
-    res.json({ success: true, license_key, expires_at });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -80,18 +108,64 @@ app.post("/activate", async (req, res) => {
       .eq("license_key", license_key)
       .single();
 
-    if (error || !data) return res.json({ success: false, message: "Invalid license" });
-    if (!data.active) return res.json({ success: false, message: "License disabled" });
-    if (new Date(data.expires_at) < new Date()) return res.json({ success: false, message: "License expired" });
-    if (data.hwid && data.hwid !== hwid) return res.json({ success: false, message: "Wrong PC" });
-
-    if (!data.hwid) {
-      await supabase.from("licenses").update({ hwid }).eq("license_key", license_key);
+    if (error || !data) {
+      return res.json({
+        success: false,
+        message: "Invalid license"
+      });
     }
 
-    res.json({ success: true, message: "License activated", expires_at: data.expires_at });
+    if (new Date(data.expires_at) < new Date()) {
+
+      if (data.active) {
+        await supabase
+          .from("licenses")
+          .update({
+            active: false
+          })
+          .eq("license_key", license_key);
+      }
+
+      return res.json({
+        success: false,
+        message: "License expired"
+      });
+    }
+
+    if (!data.active) {
+      return res.json({
+        success: false,
+        message: "License disabled"
+      });
+    }
+
+    if (data.hwid && data.hwid !== hwid) {
+      return res.json({
+        success: false,
+        message: "Wrong PC"
+      });
+    }
+
+    if (!data.hwid) {
+      await supabase
+        .from("licenses")
+        .update({
+          hwid
+        })
+        .eq("license_key", license_key);
+    }
+
+    res.json({
+      success: true,
+      message: "License activated",
+      expires_at: data.expires_at
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -105,14 +179,55 @@ app.post("/check", async (req, res) => {
       .eq("license_key", license_key)
       .single();
 
-    if (error || !data) return res.json({ success: false, message: "Invalid license" });
-    if (!data.active) return res.json({ success: false, message: "License disabled" });
-    if (new Date(data.expires_at) < new Date()) return res.json({ success: false, message: "License expired" });
-    if (data.hwid !== hwid) return res.json({ success: false, message: "Wrong PC" });
+    if (error || !data) {
+      return res.json({
+        success: false,
+        message: "Invalid license"
+      });
+    }
 
-    res.json({ success: true, message: "License valid", expires_at: data.expires_at });
+    if (new Date(data.expires_at) < new Date()) {
+
+      if (data.active) {
+        await supabase
+          .from("licenses")
+          .update({
+            active: false
+          })
+          .eq("license_key", license_key);
+      }
+
+      return res.json({
+        success: false,
+        message: "License expired"
+      });
+    }
+
+    if (!data.active) {
+      return res.json({
+        success: false,
+        message: "License disabled"
+      });
+    }
+
+    if (data.hwid !== hwid) {
+      return res.json({
+        success: false,
+        message: "Wrong PC"
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "License valid",
+      expires_at: data.expires_at
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -123,13 +238,27 @@ app.post("/admin/list", async (req, res) => {
     const { data, error } = await supabase
       .from("licenses")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("created_at", {
+        ascending: false
+      });
 
-    if (error) return res.json({ success: false, message: error.message });
+    if (error) {
+      return res.json({
+        success: false,
+        message: error.message
+      });
+    }
 
-    res.json({ success: true, licenses: data });
+    res.json({
+      success: true,
+      licenses: data
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -145,24 +274,46 @@ app.post("/admin/extend", async (req, res) => {
       .eq("license_key", license_key)
       .single();
 
-    if (error || !data) return res.json({ success: false, message: "License not found" });
+    if (error || !data) {
+      return res.json({
+        success: false,
+        message: "License not found"
+      });
+    }
 
-    const baseDate = new Date(data.expires_at) > new Date()
-      ? new Date(data.expires_at)
-      : new Date();
+    const baseDate =
+      new Date(data.expires_at) > new Date()
+        ? new Date(data.expires_at)
+        : new Date();
 
     baseDate.setDate(baseDate.getDate() + Number(days));
 
     const { error: updateError } = await supabase
       .from("licenses")
-      .update({ expires_at: baseDate.toISOString() })
+      .update({
+        expires_at: baseDate.toISOString(),
+        active: true
+      })
       .eq("license_key", license_key);
 
-    if (updateError) return res.json({ success: false, message: updateError.message });
+    if (updateError) {
+      return res.json({
+        success: false,
+        message: updateError.message
+      });
+    }
 
-    res.json({ success: true, message: "License extended", expires_at: baseDate.toISOString() });
+    res.json({
+      success: true,
+      message: "License extended",
+      expires_at: baseDate.toISOString()
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -178,21 +329,45 @@ app.post("/admin/reduce", async (req, res) => {
       .eq("license_key", license_key)
       .single();
 
-    if (error || !data) return res.json({ success: false, message: "License not found" });
+    if (error || !data) {
+      return res.json({
+        success: false,
+        message: "License not found"
+      });
+    }
 
     const date = new Date(data.expires_at);
+
     date.setDate(date.getDate() - Number(days));
+
+    const expired = date < new Date();
 
     const { error: updateError } = await supabase
       .from("licenses")
-      .update({ expires_at: date.toISOString() })
+      .update({
+        expires_at: date.toISOString(),
+        active: !expired
+      })
       .eq("license_key", license_key);
 
-    if (updateError) return res.json({ success: false, message: updateError.message });
+    if (updateError) {
+      return res.json({
+        success: false,
+        message: updateError.message
+      });
+    }
 
-    res.json({ success: true, message: "License time reduced", expires_at: date.toISOString() });
+    res.json({
+      success: true,
+      message: "License time reduced",
+      expires_at: date.toISOString()
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -204,14 +379,29 @@ app.post("/admin/lifetime", async (req, res) => {
 
     const { error } = await supabase
       .from("licenses")
-      .update({ expires_at: "9999-12-31T23:59:59.000Z" })
+      .update({
+        expires_at: "9999-12-31T23:59:59.000Z",
+        active: true
+      })
       .eq("license_key", license_key);
 
-    if (error) return res.json({ success: false, message: error.message });
+    if (error) {
+      return res.json({
+        success: false,
+        message: error.message
+      });
+    }
 
-    res.json({ success: true, message: "License set to lifetime" });
+    res.json({
+      success: true,
+      message: "License set to lifetime"
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -223,14 +413,28 @@ app.post("/admin/enable", async (req, res) => {
 
     const { error } = await supabase
       .from("licenses")
-      .update({ active: true })
+      .update({
+        active: true
+      })
       .eq("license_key", license_key);
 
-    if (error) return res.json({ success: false, message: error.message });
+    if (error) {
+      return res.json({
+        success: false,
+        message: error.message
+      });
+    }
 
-    res.json({ success: true, message: "License enabled" });
+    res.json({
+      success: true,
+      message: "License enabled"
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -242,14 +446,28 @@ app.post("/admin/disable", async (req, res) => {
 
     const { error } = await supabase
       .from("licenses")
-      .update({ active: false })
+      .update({
+        active: false
+      })
       .eq("license_key", license_key);
 
-    if (error) return res.json({ success: false, message: error.message });
+    if (error) {
+      return res.json({
+        success: false,
+        message: error.message
+      });
+    }
 
-    res.json({ success: true, message: "License disabled" });
+    res.json({
+      success: true,
+      message: "License disabled"
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -261,14 +479,28 @@ app.post("/admin/reset-hwid", async (req, res) => {
 
     const { error } = await supabase
       .from("licenses")
-      .update({ hwid: null })
+      .update({
+        hwid: null
+      })
       .eq("license_key", license_key);
 
-    if (error) return res.json({ success: false, message: error.message });
+    if (error) {
+      return res.json({
+        success: false,
+        message: error.message
+      });
+    }
 
-    res.json({ success: true, message: "HWID reset" });
+    res.json({
+      success: true,
+      message: "HWID reset"
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
@@ -283,11 +515,23 @@ app.post("/admin/delete", async (req, res) => {
       .delete()
       .eq("license_key", license_key);
 
-    if (error) return res.json({ success: false, message: error.message });
+    if (error) {
+      return res.json({
+        success: false,
+        message: error.message
+      });
+    }
 
-    res.json({ success: true, message: "License deleted" });
+    res.json({
+      success: true,
+      message: "License deleted"
+    });
+
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.json({
+      success: false,
+      message: e.message
+    });
   }
 });
 
