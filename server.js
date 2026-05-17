@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
@@ -72,6 +70,7 @@ function generateKey() {
   return out;
 }
 
+// AUTO DELETE EXPIRED LICENSES
 async function autoDeleteExpiredLicense(license) {
   try {
     if (!license) return false;
@@ -96,6 +95,7 @@ async function autoDeleteExpiredLicense(license) {
     return false;
   } catch (e) {
     console.log("Auto delete error:", e.message);
+
     return false;
   }
 }
@@ -121,6 +121,7 @@ app.post("/generate", async (req, res) => {
       .insert({
         license_key,
         expires_at,
+        active: true,
         hwid: null
       });
 
@@ -347,7 +348,8 @@ app.post("/admin/extend", async (req, res) => {
       const { error: updateError } = await supabase
         .from("licenses")
         .update({
-          expires_at: LIFETIME_DATE
+          expires_at: LIFETIME_DATE,
+          active: true
         })
         .eq("license_key", license_key);
 
@@ -365,7 +367,6 @@ app.post("/admin/extend", async (req, res) => {
       });
     }
 
-    // nie przedłużaj lifetime
     if (isLifetime(data.expires_at)) {
       return res.json({
         success: false,
@@ -385,7 +386,8 @@ app.post("/admin/extend", async (req, res) => {
     const { error: updateError } = await supabase
       .from("licenses")
       .update({
-        expires_at: baseDate.toISOString()
+        expires_at: baseDate.toISOString(),
+        active: true
       })
       .eq("license_key", license_key);
 
@@ -468,7 +470,8 @@ app.post("/admin/reduce", async (req, res) => {
     const { error: updateError } = await supabase
       .from("licenses")
       .update({
-        expires_at: date.toISOString()
+        expires_at: date.toISOString(),
+        active: true
       })
       .eq("license_key", license_key);
 
@@ -501,7 +504,8 @@ app.post("/admin/lifetime", async (req, res) => {
     const { error } = await supabase
       .from("licenses")
       .update({
-        expires_at: LIFETIME_DATE
+        expires_at: LIFETIME_DATE,
+        active: true
       })
       .eq("license_key", license_key);
 
@@ -515,6 +519,70 @@ app.post("/admin/lifetime", async (req, res) => {
     res.json({
       success: true,
       message: "License set to lifetime"
+    });
+  } catch (e) {
+    res.json({
+      success: false,
+      message: e.message
+    });
+  }
+});
+
+app.post("/admin/enable", async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+
+    const { license_key } = req.body;
+
+    const { error } = await supabase
+      .from("licenses")
+      .update({
+        active: true
+      })
+      .eq("license_key", license_key);
+
+    if (error) {
+      return res.json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "License enabled"
+    });
+  } catch (e) {
+    res.json({
+      success: false,
+      message: e.message
+    });
+  }
+});
+
+app.post("/admin/disable", async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+
+    const { license_key } = req.body;
+
+    const { error } = await supabase
+      .from("licenses")
+      .update({
+        active: false
+      })
+      .eq("license_key", license_key);
+
+    if (error) {
+      return res.json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "License disabled"
     });
   } catch (e) {
     res.json({
