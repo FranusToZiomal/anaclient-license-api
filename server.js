@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
@@ -70,29 +72,31 @@ function generateKey() {
   return out;
 }
 
-async function autoDisableExpiredLicense(license) {
+async function autoDeleteExpiredLicense(license) {
   try {
-    if (!license) return;
+    if (!license) return false;
 
+    // lifetime zostaje
     if (isLifetime(license.expires_at)) {
-      return;
+      return false;
     }
 
     const expired =
       new Date(license.expires_at) < new Date();
 
-    if (expired && license.active === true) {
+    if (expired) {
       await supabase
         .from("licenses")
-        .update({
-          active: false
-        })
+        .delete()
         .eq("license_key", license.license_key);
 
-      license.active = false;
+      return true;
     }
+
+    return false;
   } catch (e) {
-    console.log("Auto disable error:", e.message);
+    console.log("Auto delete error:", e.message);
+    return false;
   }
 }
 
@@ -108,7 +112,6 @@ app.post("/generate", async (req, res) => {
 
     const license_key = generateKey();
 
-    // ważne: ?? zamiast ||
     const days = req.body.days ?? 7;
 
     const expires_at = addDays(days);
@@ -118,7 +121,6 @@ app.post("/generate", async (req, res) => {
       .insert({
         license_key,
         expires_at,
-        active: true,
         hwid: null
       });
 
@@ -167,12 +169,13 @@ app.post("/activate", async (req, res) => {
       });
     }
 
-    await autoDisableExpiredLicense(data);
+    const deleted =
+      await autoDeleteExpiredLicense(data);
 
-    if (!data.active) {
+    if (deleted) {
       return res.json({
         success: false,
-        message: "License disabled or expired"
+        message: "License expired"
       });
     }
 
@@ -239,12 +242,13 @@ app.post("/check", async (req, res) => {
       });
     }
 
-    await autoDisableExpiredLicense(data);
+    const deleted =
+      await autoDeleteExpiredLicense(data);
 
-    if (!data.active) {
+    if (deleted) {
       return res.json({
         success: false,
-        message: "License disabled or expired"
+        message: "License expired"
       });
     }
 
@@ -288,12 +292,19 @@ app.post("/admin/list", async (req, res) => {
     }
 
     for (const license of data) {
-      await autoDisableExpiredLicense(license);
+      await autoDeleteExpiredLicense(license);
     }
+
+    const { data: refreshedData } = await supabase
+      .from("licenses")
+      .select("*")
+      .order("created_at", {
+        ascending: false
+      });
 
     res.json({
       success: true,
-      licenses: data
+      licenses: refreshedData
     });
   } catch (e) {
     res.json({
@@ -336,8 +347,7 @@ app.post("/admin/extend", async (req, res) => {
       const { error: updateError } = await supabase
         .from("licenses")
         .update({
-          expires_at: LIFETIME_DATE,
-          active: true
+          expires_at: LIFETIME_DATE
         })
         .eq("license_key", license_key);
 
@@ -375,8 +385,7 @@ app.post("/admin/extend", async (req, res) => {
     const { error: updateError } = await supabase
       .from("licenses")
       .update({
-        expires_at: baseDate.toISOString(),
-        active: true
+        expires_at: baseDate.toISOString()
       })
       .eq("license_key", license_key);
 
@@ -428,7 +437,6 @@ app.post("/admin/reduce", async (req, res) => {
       });
     }
 
-    // zabezpieczenie lifetime
     if (isLifetime(data.expires_at)) {
       return res.json({
         success: false,
@@ -445,11 +453,22 @@ app.post("/admin/reduce", async (req, res) => {
     const expired =
       date < new Date();
 
+    if (expired) {
+      await supabase
+        .from("licenses")
+        .delete()
+        .eq("license_key", license_key);
+
+      return res.json({
+        success: true,
+        message: "License expired and deleted"
+      });
+    }
+
     const { error: updateError } = await supabase
       .from("licenses")
       .update({
-        expires_at: date.toISOString(),
-        active: !expired
+        expires_at: date.toISOString()
       })
       .eq("license_key", license_key);
 
@@ -463,8 +482,7 @@ app.post("/admin/reduce", async (req, res) => {
     res.json({
       success: true,
       message: "License time reduced",
-      expires_at: date.toISOString(),
-      expired
+      expires_at: date.toISOString()
     });
   } catch (e) {
     res.json({
@@ -483,8 +501,7 @@ app.post("/admin/lifetime", async (req, res) => {
     const { error } = await supabase
       .from("licenses")
       .update({
-        expires_at: LIFETIME_DATE,
-        active: true
+        expires_at: LIFETIME_DATE
       })
       .eq("license_key", license_key);
 
@@ -498,70 +515,6 @@ app.post("/admin/lifetime", async (req, res) => {
     res.json({
       success: true,
       message: "License set to lifetime"
-    });
-  } catch (e) {
-    res.json({
-      success: false,
-      message: e.message
-    });
-  }
-});
-
-app.post("/admin/enable", async (req, res) => {
-  try {
-    if (!requireAdmin(req, res)) return;
-
-    const { license_key } = req.body;
-
-    const { error } = await supabase
-      .from("licenses")
-      .update({
-        active: true
-      })
-      .eq("license_key", license_key);
-
-    if (error) {
-      return res.json({
-        success: false,
-        message: error.message
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "License enabled"
-    });
-  } catch (e) {
-    res.json({
-      success: false,
-      message: e.message
-    });
-  }
-});
-
-app.post("/admin/disable", async (req, res) => {
-  try {
-    if (!requireAdmin(req, res)) return;
-
-    const { license_key } = req.body;
-
-    const { error } = await supabase
-      .from("licenses")
-      .update({
-        active: false
-      })
-      .eq("license_key", license_key);
-
-    if (error) {
-      return res.json({
-        success: false,
-        message: error.message
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "License disabled"
     });
   } catch (e) {
     res.json({
